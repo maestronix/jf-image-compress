@@ -1,0 +1,41 @@
+name: Build Jellyfin plugin
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore Jellyfin.Plugin.ImageCompress.csproj
+      - name: Build
+        run: dotnet build Jellyfin.Plugin.ImageCompress.csproj --configuration Release --no-restore
+      - name: Validate metadata
+        run: |
+          jq empty manifest.json
+          jq empty meta.json
+          test "$(jq -r '.targetAbi' meta.json)" = "12.4.0.0"
+          test "$(jq -r '.framework' meta.json)" = "net10.0"
+      - name: Package
+        run: |
+          mkdir -p package
+          cp bin/Release/net10.0/Jellyfin.Plugin.ImageCompress.dll package/
+          cp meta.json package/
+          (cd package && zip -r ../Jellyfin.Plugin.ImageCompress.zip .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Jellyfin.Plugin.ImageCompress
+          path: Jellyfin.Plugin.ImageCompress.zip
+          if-no-files-found: error
