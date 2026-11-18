@@ -5,12 +5,10 @@ using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.Drawing;
+using MediaBrowser.Controller.Drawing;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Jpeg;
-using SixLabors.ImageSharp.Formats.Webp;
-using SixLabors.ImageSharp.Processing;
 
 namespace Jellyfin.Plugin.ImageCompress.Tasks;
 
@@ -23,15 +21,18 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
 
     private readonly IApplicationPaths _applicationPaths;
     private readonly ILibraryManager _libraryManager;
+    private readonly IImageEncoder _imageEncoder;
     private readonly ILogger<CompressMetadataImagesTask> _logger;
 
     public CompressMetadataImagesTask(
         IApplicationPaths applicationPaths,
         ILibraryManager libraryManager,
+        IImageEncoder imageEncoder,
         ILogger<CompressMetadataImagesTask> logger)
     {
         _applicationPaths = applicationPaths;
         _libraryManager = libraryManager;
+        _imageEncoder = imageEncoder;
         _logger = logger;
     }
 
@@ -79,7 +80,7 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
 
                     if (!alreadyProcessed)
                     {
-                        var result = await ProcessImageAsync(entry.Path, entry.IsPerson, token).ConfigureAwait(false);
+                        var result = ProcessImage(entry.Path, entry.IsPerson);
                         if (result.Attempted)
                         {
                             var newFingerprint = GetFingerprint(entry.Path);
@@ -111,6 +112,8 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
                 {
                     progress.Report(imagePaths.Count == 0 ? 100 : current * 100d / imagePaths.Count);
                 }
+
+                return ValueTask.CompletedTask;
             }).ConfigureAwait(false);
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -298,72 +301,80 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
         }
     }
 
-    private static async Task<ProcessResult> ProcessImageAsync(string path, bool isPerson, CancellationToken cancellationToken)
+    private ProcessResult ProcessImage(string path, bool isPerson)
     {
         if (!File.Exists(path))
         {
             return new ProcessResult(0, false);
         }
 
-        var originalLength = new FileInfo(path).Length;
-        var info = await Image.IdentifyAsync(path, cancellationToken).ConfigureAwait(false);
-        if (info is null)
+        var extension = Path.GetExtension(path);
+        var inputFormat = extension.TrimStart('.');
+        if (!_imageEncoder.SupportedInputFormats.Contains(inputFormat, StringComparer.OrdinalIgnoreCase))
         {
             return new ProcessResult(0, false);
         }
 
-        var maxWidth = isPerson ? 400 : int.MaxValue;
-        var maxHeight = isPerson ? int.MaxValue : 900;
+        var outputFormat = extension.ToLowerInvariant() switch
+        {
+            ".jpg" or ".jpeg" => ImageFormat.Jpg,
+            ".png" => ImageFormat.Png,
+            ".webp" => ImageFormat.Webp,
+            _ => (ImageFormat?)null
+        };
+
+        if (!outputFormat.HasValue || !_imageEncoder.SupportedOutputFormats.Contains(outputFormat.Value))
+        {
+            return new ProcessResult(0, false);
+        }
+
+        var originalInfo = new FileInfo(path);
+        var originalLength = originalInfo.Length;
+        var originalModified = originalInfo.LastWriteTimeUtc;
+        var dimensions = _imageEncoder.GetImageSize(path);
+        if (dimensions.Width <= 0 || dimensions.Height <= 0)
+        {
+            return new ProcessResult(0, false);
+        }
+
+        var maxWidth = isPerson ? 400 : (int?)null;
+        var maxHeight = isPerson ? (int?)null : 900;
 
         // Never re-encode images already within their applicable dimensions.
-        if (info.Width <= maxWidth && info.Height <= maxHeight)
-        {
-            return new ProcessResult(0, false);
-        }
-
-        var scale = Math.Min(
-            Math.Min((double)maxWidth / info.Width, (double)maxHeight / info.Height),
-            1d);
-
-        var targetWidth = Math.Max(1, (int)Math.Round(info.Width * scale));
-        var targetHeight = Math.Max(1, (int)Math.Round(info.Height * scale));
-        var format = info.Metadata.DecodedImageFormat;
-        if (format is null)
+        if ((!maxWidth.HasValue || dimensions.Width <= maxWidth.Value) &&
+            (!maxHeight.HasValue || dimensions.Height <= maxHeight.Value))
         {
             return new ProcessResult(0, false);
         }
 
         var temporaryPath = Path.Combine(
             Path.GetDirectoryName(path)!,
-            $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+            $".{Path.GetFileNameWithoutExtension(path)}.{Guid.NewGuid():N}.tmp{extension}");
 
         try
         {
-            using var image = await Image.LoadAsync(path, cancellationToken).ConfigureAwait(false);
-            image.Mutate(operation => operation.Resize(targetWidth, targetHeight));
-
-            await using (var output = new FileStream(
-                temporaryPath,
-                FileMode.CreateNew,
-                FileAccess.Write,
-                FileShare.None,
-                1024 * 64,
-                FileOptions.Asynchronous | FileOptions.SequentialScan))
+            var options = new ImageProcessingOptions
             {
-                if (format.Name.Equals("JPEG", StringComparison.OrdinalIgnoreCase))
-                {
-                    await image.SaveAsync(output, new JpegEncoder { Quality = 85 }, cancellationToken).ConfigureAwait(false);
-                }
-                else if (format.Name.Equals("WEBP", StringComparison.OrdinalIgnoreCase))
-                {
-                    await image.SaveAsync(output, new WebpEncoder { Quality = 85 }, cancellationToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    await image.SaveAsync(output, format, cancellationToken).ConfigureAwait(false);
-                }
+                MaxWidth = maxWidth,
+                MaxHeight = maxHeight,
+                Quality = 85,
+                RequiresAutoOrientation = true,
+                SupportedOutputFormats = new[] { outputFormat.Value }
+            };
 
-                await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+            var encodedPath = _imageEncoder.EncodeImage(
+                path,
+                originalModified,
+                temporaryPath,
+                autoOrient: true,
+                orientation: null,
+                quality: 85,
+                options,
+                outputFormat.Value);
+
+            if (!string.Equals(encodedPath, temporaryPath, StringComparison.Ordinal) || !File.Exists(temporaryPath))
+            {
+                return new ProcessResult(0, false);
             }
 
             var compressedLength = new FileInfo(temporaryPath).Length;
