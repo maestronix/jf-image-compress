@@ -1,0 +1,11 @@
+[
+  {
+    "guid": "2c1f88e1-6e9b-4e70-9f61-6a6f4b2b1c10",
+    "name": "Image Compress",
+    "description": "Resizes oversized Jellyfin metadata images without repeatedly re-encoding images within the configured dimensions.",
+    "overview": "Automatically resizes oversized movie, series, season and person images. Preserves image formats and aspect ratios, only replaces files when the result is smaller, and runs daily.",
+    "owner": "maestronix",
+    "category": "General",
+    "versions": []
+  }
+]
