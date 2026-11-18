@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Jellyfin.Data.Enums;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Entities;
@@ -53,6 +54,7 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
         var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
         var maxConcurrency = Math.Clamp(config.MaxConcurrency, 1, 64);
         var imagePaths = CollectImagePaths(cancellationToken);
+        var processedState = await LoadProcessedStateAsync(cancellationToken).ConfigureAwait(false);
 
         long converted = 0;
         long savedBytes = 0;
@@ -70,11 +72,28 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
             {
                 try
                 {
-                    var saved = await ProcessImageAsync(entry.Path, entry.IsPerson, token).ConfigureAwait(false);
-                    if (saved > 0)
+                    var fingerprint = GetFingerprint(entry.Path);
+                    if (fingerprint is not null &&
+                        processedState.TryGetValue(entry.Path, out var previousFingerprint) &&
+                        string.Equals(fingerprint, previousFingerprint, StringComparison.Ordinal))
+                    {
+                        return;
+                    }
+
+                    var result = await ProcessImageAsync(entry.Path, entry.IsPerson, token).ConfigureAwait(false);
+                    if (result.Attempted)
+                    {
+                        var newFingerprint = GetFingerprint(entry.Path);
+                        if (newFingerprint is not null)
+                        {
+                            processedState[entry.Path] = newFingerprint;
+                        }
+                    }
+
+                    if (result.SavedBytes > 0)
                     {
                         Interlocked.Increment(ref converted);
-                        Interlocked.Add(ref savedBytes, saved);
+                        Interlocked.Add(ref savedBytes, result.SavedBytes);
                     }
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -95,6 +114,8 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
             }).ConfigureAwait(false);
 
         cancellationToken.ThrowIfCancellationRequested();
+
+        await SaveProcessedStateAsync(processedState, cancellationToken).ConfigureAwait(false);
 
         var currentSize = imagePaths.Sum(entry =>
         {
@@ -218,18 +239,77 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
             .Any(segment => segment.Equals("People", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static async Task<long> ProcessImageAsync(string path, bool isPerson, CancellationToken cancellationToken)
+    private string ProcessedStatePath => Path.Combine(_applicationPaths.PluginConfigurationsPath, "ImageCompress", "processed-images.json");
+
+    private async Task<ConcurrentDictionary<string, string>> LoadProcessedStateAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!File.Exists(ProcessedStatePath))
+            {
+                return new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var json = await File.ReadAllTextAsync(ProcessedStatePath, cancellationToken).ConfigureAwait(false);
+            var stored = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+            return new ConcurrentDictionary<string, string>(
+                stored ?? new Dictionary<string, string>(),
+                StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Could not load Image Compress processing state; images may be checked again.");
+            return new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private async Task SaveProcessedStateAsync(
+        ConcurrentDictionary<string, string> state,
+        CancellationToken cancellationToken)
+    {
+        var directory = Path.GetDirectoryName(ProcessedStatePath)!;
+        Directory.CreateDirectory(directory);
+        var temporaryPath = ProcessedStatePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            var json = JsonSerializer.Serialize(state);
+            await File.WriteAllTextAsync(temporaryPath, json, cancellationToken).ConfigureAwait(false);
+            File.Move(temporaryPath, ProcessedStatePath, true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private static string? GetFingerprint(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return info.Exists ? $"{info.Length}:{info.LastWriteTimeUtc.Ticks}" : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static async Task<ProcessResult> ProcessImageAsync(string path, bool isPerson, CancellationToken cancellationToken)
     {
         if (!File.Exists(path))
         {
-            return 0;
+            return new ProcessResult(0, false);
         }
 
         var originalLength = new FileInfo(path).Length;
         var info = await Image.IdentifyAsync(path, cancellationToken).ConfigureAwait(false);
         if (info is null)
         {
-            return 0;
+            return new ProcessResult(0, false);
         }
 
         var maxWidth = isPerson ? 400 : int.MaxValue;
@@ -294,7 +374,7 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
 
             // The temporary file is in the same directory, so replacement is an atomic rename.
             File.Move(temporaryPath, path, true);
-            return originalLength - compressedLength;
+            return new ProcessResult(originalLength - compressedLength, true);
         }
         finally
         {
@@ -306,4 +386,6 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
     }
 
     private sealed record ImagePath(string Path, bool IsPerson);
+
+    private sealed record ProcessResult(long SavedBytes, bool Attempted);
 }
