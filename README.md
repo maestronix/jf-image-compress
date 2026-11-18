@@ -6,7 +6,7 @@ A Jellyfin 12.4 plugin that reduces oversized metadata artwork while leaving alr
 
 - Movie, series and season artwork: maximum height **900 px**; aspect ratio is preserved.
 - Person/cast artwork: maximum width **400 px**; aspect ratio is preserved.
-- JPEG and WebP output use quality **85**. Other formats are encoded in their original format with the format's default encoder settings.
+- JPEG and WebP output use quality **85**; PNG remains lossless. Processing uses Jellyfin's built-in Skia encoder, so no extra image-processing runtime is bundled. Other input formats that Jellyfin cannot encode back into the same format are left untouched.
 - The original is replaced only when the new file is smaller.
 - The replacement is written to a temporary file in the same directory and then atomically swapped into place.
 - Images already within their applicable dimension limit are never re-encoded.
