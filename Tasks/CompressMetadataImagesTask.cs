@@ -318,7 +318,7 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
         // Never re-encode images already within their applicable dimensions.
         if (info.Width <= maxWidth && info.Height <= maxHeight)
         {
-            return 0;
+            return new ProcessResult(0, false);
         }
 
         var scale = Math.Min(
@@ -330,7 +330,7 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
         var format = info.Metadata.DecodedImageFormat;
         if (format is null)
         {
-            return 0;
+            return new ProcessResult(0, false);
         }
 
         var temporaryPath = Path.Combine(
@@ -369,7 +369,7 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
             var compressedLength = new FileInfo(temporaryPath).Length;
             if (compressedLength >= originalLength)
             {
-                return 0;
+                return new ProcessResult(0, true);
             }
 
             // The temporary file is in the same directory, so replacement is an atomic rename.
