@@ -73,27 +73,27 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
                 try
                 {
                     var fingerprint = GetFingerprint(entry.Path);
-                    if (fingerprint is not null &&
+                    var alreadyProcessed = fingerprint is not null &&
                         processedState.TryGetValue(entry.Path, out var previousFingerprint) &&
-                        string.Equals(fingerprint, previousFingerprint, StringComparison.Ordinal))
-                    {
-                        return;
-                    }
+                        string.Equals(fingerprint, previousFingerprint, StringComparison.Ordinal);
 
-                    var result = await ProcessImageAsync(entry.Path, entry.IsPerson, token).ConfigureAwait(false);
-                    if (result.Attempted)
+                    if (!alreadyProcessed)
                     {
-                        var newFingerprint = GetFingerprint(entry.Path);
-                        if (newFingerprint is not null)
+                        var result = await ProcessImageAsync(entry.Path, entry.IsPerson, token).ConfigureAwait(false);
+                        if (result.Attempted)
                         {
-                            processedState[entry.Path] = newFingerprint;
+                            var newFingerprint = GetFingerprint(entry.Path);
+                            if (newFingerprint is not null)
+                            {
+                                processedState[entry.Path] = newFingerprint;
+                            }
                         }
-                    }
 
-                    if (result.SavedBytes > 0)
-                    {
-                        Interlocked.Increment(ref converted);
-                        Interlocked.Add(ref savedBytes, result.SavedBytes);
+                        if (result.SavedBytes > 0)
+                        {
+                            Interlocked.Increment(ref converted);
+                            Interlocked.Add(ref savedBytes, result.SavedBytes);
+                        }
                     }
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
