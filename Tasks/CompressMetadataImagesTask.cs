@@ -129,8 +129,9 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
     {
         var paths = new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
-        AddDirectory(_applicationPaths.MetadataPath, paths, cancellationToken);
-        AddDirectory(_applicationPaths.PeoplePath, paths, cancellationToken, isPerson: true);
+        var metadataPath = Path.Combine(_applicationPaths.DataPath, "metadata");
+        AddDirectory(metadataPath, paths, cancellationToken);
+        AddDirectory(Path.Combine(metadataPath, "People"), paths, cancellationToken, isPerson: true);
 
         var items = _libraryManager.GetItemList(new InternalItemsQuery
         {
