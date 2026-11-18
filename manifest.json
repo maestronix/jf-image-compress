@@ -6,6 +6,15 @@
     "overview": "Automatically resizes oversized movie, series, season and person images. Preserves image formats and aspect ratios, only replaces files when the result is smaller, and runs daily.",
     "owner": "maestronix",
     "category": "General",
-    "versions": []
+    "versions": [
+      {
+        "version": "1.0.0.0",
+        "changelog": "Initial release for Jellyfin 12.4.",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/maestronix/jf-image-compress/releases/download/v1.0.0.0/Jellyfin.Plugin.ImageCompress_v1.0.0.0.zip",
+        "checksum": "AF5D17AAA8CAFAF9B1FAA7DDB65F8395",
+        "timestamp": "2026-11-18T09:32:46Z"
+      }
+    ]
   }
 ]
