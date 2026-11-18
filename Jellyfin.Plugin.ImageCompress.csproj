@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Jellyfin.Plugin.ImageCompress</RootNamespace>
+    <AssemblyName>Jellyfin.Plugin.ImageCompress</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Version>1.0.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Jellyfin.Controller" Version="12.4.0"><ExcludeAssets>runtime</ExcludeAssets></PackageReference>
+    <PackageReference Include="Jellyfin.Model" Version="12.4.0"><ExcludeAssets>runtime</ExcludeAssets></PackageReference>
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
+  </ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Configuration/configPage.html" /></ItemGroup>
+</Project>
