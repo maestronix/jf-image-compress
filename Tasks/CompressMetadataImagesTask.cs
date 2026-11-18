@@ -69,8 +69,9 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
                 MaxDegreeOfParallelism = maxConcurrency,
                 CancellationToken = cancellationToken
             },
-            async (entry, token) =>
+            (entry, token) =>
             {
+                token.ThrowIfCancellationRequested();
                 try
                 {
                     var fingerprint = GetFingerprint(entry.Path);
@@ -369,8 +370,8 @@ public sealed class CompressMetadataImagesTask : IScheduledTask
                 autoOrient: true,
                 orientation: null,
                 quality: 85,
-                options,
-                outputFormat.Value);
+                options: options,
+                outputFormat: outputFormat.Value);
 
             if (!string.Equals(encodedPath, temporaryPath, StringComparison.Ordinal) || !File.Exists(temporaryPath))
             {
