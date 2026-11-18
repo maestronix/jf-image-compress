@@ -32,7 +32,6 @@ jobs:
           PACKAGE="Jellyfin.Plugin.ImageCompress_v${VERSION}.zip"
           mkdir -p package
           cp bin/Release/net10.0/Jellyfin.Plugin.ImageCompress.dll package/
-          cp bin/Release/net10.0/SixLabors.ImageSharp.dll package/
           cp meta.json package/
           (cd package && zip -r "../${PACKAGE}" .)
           CHECKSUM="$(md5sum "${PACKAGE}" | awk '{print toupper($1)}')"
