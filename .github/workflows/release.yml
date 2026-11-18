@@ -1,0 +1,83 @@
+name: Release Jellyfin plugin
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore and build
+        run: |
+          dotnet restore Jellyfin.Plugin.ImageCompress.csproj
+          dotnet build Jellyfin.Plugin.ImageCompress.csproj --configuration Release --no-restore
+      - name: Package release
+        id: package
+        run: |
+          VERSION="$(jq -r '.version' meta.json)"
+          TARGET_ABI="$(jq -r '.targetAbi' meta.json)"
+          CHANGELOG="$(jq -r '.changelog' meta.json)"
+          PACKAGE="Jellyfin.Plugin.ImageCompress_v${VERSION}.zip"
+          mkdir -p package
+          cp bin/Release/net10.0/Jellyfin.Plugin.ImageCompress.dll package/
+          cp meta.json package/
+          (cd package && zip -r "../${PACKAGE}" .)
+          CHECKSUM="$(md5sum "${PACKAGE}" | awk '{print toupper($1)}')"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "target_abi=${TARGET_ABI}" >> "$GITHUB_OUTPUT"
+          echo "changelog=${CHANGELOG}" >> "$GITHUB_OUTPUT"
+          echo "package=${PACKAGE}" >> "$GITHUB_OUTPUT"
+          echo "checksum=${CHECKSUM}" >> "$GITHUB_OUTPUT"
+          echo "timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.package.outputs.version }}
+          name: Image Compress v${{ steps.package.outputs.version }}
+          generate_release_notes: true
+          files: ${{ steps.package.outputs.package }}
+      - name: Update plugin manifest
+        env:
+          VERSION: ${{ steps.package.outputs.version }}
+          TARGET_ABI: ${{ steps.package.outputs.target_abi }}
+          CHANGELOG: ${{ steps.package.outputs.changelog }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+          TIMESTAMP: ${{ steps.package.outputs.timestamp }}
+          PACKAGE: ${{ steps.package.outputs.package }}
+        run: |
+          SOURCE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${PACKAGE}"
+          jq \
+            --arg version "$VERSION" \
+            --arg targetAbi "$TARGET_ABI" \
+            --arg changelog "$CHANGELOG" \
+            --arg checksum "$CHECKSUM" \
+            --arg sourceUrl "$SOURCE_URL" \
+            --arg timestamp "$TIMESTAMP" \
+            '.[0].versions = ([{
+              version: $version,
+              changelog: $changelog,
+              targetAbi: $targetAbi,
+              sourceUrl: $sourceUrl,
+              checksum: $checksum,
+              timestamp: $timestamp
+            }] + [.[0].versions[] | select(.version != $version)])' manifest.json > manifest.tmp
+          mv manifest.tmp manifest.json
+      - name: Commit updated manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git diff --cached --quiet || git commit -m "Update manifest for v${{ steps.package.outputs.version }}"
+          git push origin HEAD:main
