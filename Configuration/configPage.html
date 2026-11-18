@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Image Compress</title>
+</head>
+<body>
+    <div id="ImageCompressConfigPage" data-role="page" class="page type-interior pluginConfigurationPage">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="ImageCompressConfigForm">
+                    <div class="inputContainer">
+                        <label class="inputLabel" for="MaxConcurrency">Maximum concurrency</label>
+                        <input id="MaxConcurrency" name="MaxConcurrency" type="number" min="1" max="64" required />
+                        <div class="fieldDescription">Maximum number of images processed simultaneously. The default is the number of CPU cores.</div>
+                    </div>
+                    <button type="submit" is="emby-button" class="raised button-submit block">
+                        <span>Save</span>
+                    </button>
+                </form>
+
+                <h2>Statistics</h2>
+                <div class="paperList">
+                    <div class="listItem"><div class="listItemBody">
+                        <div class="listItemBodyText">Current metadata image size</div>
+                        <div class="secondary" id="MetadataImagesBytes">—</div>
+                    </div></div>
+                    <div class="listItem"><div class="listItemBody">
+                        <div class="listItemBodyText">Images converted in last run</div>
+                        <div class="secondary" id="LastRunConvertedImages">—</div>
+                    </div></div>
+                    <div class="listItem"><div class="listItemBody">
+                        <div class="listItemBodyText">Space saved in last run</div>
+                        <div class="secondary" id="LastRunSavedBytes">—</div>
+                    </div></div>
+                    <div class="listItem"><div class="listItemBody">
+                        <div class="listItemBodyText">Images converted total</div>
+                        <div class="secondary" id="TotalConvertedImages">—</div>
+                    </div></div>
+                    <div class="listItem"><div class="listItemBody">
+                        <div class="listItemBodyText">Space saved total</div>
+                        <div class="secondary" id="TotalSavedBytes">—</div>
+                    </div></div>
+                    <div class="listItem"><div class="listItemBody">
+                        <div class="listItemBodyText">Last run</div>
+                        <div class="secondary" id="LastRunAtUtc">—</div>
+                    </div></div>
+                </div>
+                <p class="fieldDescription">The scheduled task runs daily at 03:00. It only processes images above their applicable size limit and never re-encodes images that are already within those limits.</p>
+            </div>
+        </div>
+    </div>
+    <script>
+        (function () {
+            const pluginId = '2c1f88e1-6e9b-4e70-9f61-6a6f4b2b1c10';
+            const page = document.querySelector('#ImageCompressConfigPage');
+            if (page.dataset.bound === 'true') {
+                return;
+            }
+            page.dataset.bound = 'true';
+
+            const formatBytes = function (bytes) {
+                let value = Number(bytes || 0);
+                const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+                let index = 0;
+                while (value >= 1024 && index < units.length - 1) {
+                    value /= 1024;
+                    index++;
+                }
+                return value.toFixed(index === 0 ? 0 : 2) + ' ' + units[index];
+            };
+
+            const loadConfiguration = function () {
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    page.querySelector('#MaxConcurrency').value = config.MaxConcurrency || 1;
+                    page.querySelector('#MetadataImagesBytes').textContent = formatBytes(config.MetadataImagesBytes);
+                    page.querySelector('#LastRunConvertedImages').textContent = Number(config.LastRunConvertedImages || 0).toLocaleString();
+                    page.querySelector('#LastRunSavedBytes').textContent = formatBytes(config.LastRunSavedBytes);
+                    page.querySelector('#TotalConvertedImages').textContent = Number(config.TotalConvertedImages || 0).toLocaleString();
+                    page.querySelector('#TotalSavedBytes').textContent = formatBytes(config.TotalSavedBytes);
+                    page.querySelector('#LastRunAtUtc').textContent = config.LastRunAtUtc
+                        ? new Date(config.LastRunAtUtc).toLocaleString()
+                        : 'Not run yet';
+                });
+            };
+
+            page.querySelector('#ImageCompressConfigForm').addEventListener('submit', function (event) {
+                event.preventDefault();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    config.MaxConcurrency = Math.max(1, Math.min(64, Number(page.querySelector('#MaxConcurrency').value) || 1));
+                    ApiClient.updatePluginConfiguration(pluginId, config).then(function () {
+                        Dashboard.processPluginConfigurationUpdateResult();
+                    });
+                });
+            });
+
+            page.addEventListener('pageshow', loadConfiguration);
+            loadConfiguration();
+        })();
+    </script>
+</body>
+</html>
